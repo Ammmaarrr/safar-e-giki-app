@@ -15,7 +15,7 @@ export function PaymentCallback() {
       const sig = searchParams.get('sig');
       const bookingId = searchParams.get('bookingId');
 
-      if (!tracker || !sig) {
+      if (!tracker || tracker.trim() === '' || !sig || sig.trim() === '') {
         setStatus('failed');
         setMessage('Missing payment verification parameters');
         return;
@@ -23,8 +23,8 @@ export function PaymentCallback() {
 
       try {
         const result = await paymentsApi.verify({
-          tracker: tracker!,
-          sig: sig!,
+          tracker,
+          sig,
           bookingId: bookingId || undefined,
         });
 
