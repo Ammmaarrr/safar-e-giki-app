@@ -3,9 +3,11 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import busesRoutes from './routes/buses';
+import routesRoutes from './routes/routes';
 import bookingsRoutes from './routes/bookings';
 import paymentsRoutes from './routes/payments';
 import { errorHandler } from './middleware/errorHandler';
+import { apiLimiter, authLimiter, paymentLimiter } from './middleware/rateLimit';
 
 dotenv.config();
 
@@ -18,18 +20,21 @@ app.use(cors({
   credentials: true,
 }));
 
+// Apply general rate limiting to all API routes
+app.use('/api', apiLimiter);
+
 // Raw body for Stripe webhooks
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 
 // JSON body parser for other routes
 app.use(express.json());
 
-// Routes
-app.use('/api/auth', authRoutes);
+// Routes with specific rate limiters
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/buses', busesRoutes);
-app.use('/api/routes', busesRoutes); // Routes also handled by buses routes
+app.use('/api/routes', routesRoutes);
 app.use('/api/bookings', bookingsRoutes);
-app.use('/api/payments', paymentsRoutes);
+app.use('/api/payments', paymentLimiter, paymentsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

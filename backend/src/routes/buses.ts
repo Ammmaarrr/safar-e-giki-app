@@ -42,42 +42,6 @@ const buses = [
   },
 ];
 
-// Mock routes data
-const routes = [
-  {
-    id: 'giki-multan',
-    from: 'GIKI',
-    to: 'Multan',
-    distance: '450 km',
-    estimatedTime: '6 hrs',
-  },
-  {
-    id: 'multan-giki',
-    from: 'Multan',
-    to: 'GIKI',
-    distance: '450 km',
-    estimatedTime: '6 hrs',
-  },
-];
-
-// Mock seat data generator
-const generateSeats = (totalSeats: number) => {
-  const bookedSeats = [3, 7, 12, 15, 21, 28, 33].filter((s) => s <= totalSeats);
-  const femaleSeats = [5, 18, 24].filter((s) => s <= totalSeats);
-  const maleSeats = [8, 16, 29].filter((s) => s <= totalSeats);
-
-  const seats = [];
-  for (let i = 1; i <= totalSeats; i++) {
-    let status: 'available' | 'booked' | 'female' | 'male' = 'available';
-    if (bookedSeats.includes(i)) status = 'booked';
-    else if (femaleSeats.includes(i)) status = 'female';
-    else if (maleSeats.includes(i)) status = 'male';
-
-    seats.push({ number: i, status });
-  }
-  return seats;
-};
-
 // GET /api/buses - List all buses
 router.get('/', (req: Request, res: Response) => {
   res.json(buses);
@@ -93,47 +57,6 @@ router.get('/:id', (req: Request, res: Response, next: NextFunction) => {
   }
 
   res.json(bus);
-});
-
-// GET /api/routes - Search routes
-router.get('/routes', (req: Request, res: Response) => {
-  const { from, to, date } = req.query;
-
-  let filteredRoutes = routes;
-
-  if (from) {
-    filteredRoutes = filteredRoutes.filter(
-      (r) => r.from.toLowerCase() === String(from).toLowerCase()
-    );
-  }
-
-  if (to) {
-    filteredRoutes = filteredRoutes.filter(
-      (r) => r.to.toLowerCase() === String(to).toLowerCase()
-    );
-  }
-
-  // Return routes with available buses
-  const routesWithBuses = filteredRoutes.map((route) => ({
-    ...route,
-    buses: buses,
-    date: date || new Date().toISOString().split('T')[0],
-  }));
-
-  res.json(routesWithBuses);
-});
-
-// GET /api/routes/:id/seats - Get available seats for a route
-router.get('/routes/:id/seats', (req: Request, res: Response) => {
-  const { busId } = req.query;
-
-  const bus = buses.find((b) => b.id === parseInt(String(busId)));
-  if (!bus) {
-    return res.status(404).json({ message: 'Bus not found' });
-  }
-
-  const seats = generateSeats(bus.totalSeats);
-  res.json(seats);
 });
 
 export default router;

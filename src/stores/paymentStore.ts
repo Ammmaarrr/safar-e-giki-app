@@ -26,6 +26,7 @@ export const usePaymentStore = create<PaymentState>((set) => ({
   status: 'idle',
   error: null,
   amount: 0,
+  // Currency code must be lowercase per Stripe API requirements (ISO 4217)
   currency: 'pkr',
   isStripeReady: false,
   setClientSecret: (clientSecret) => set({ clientSecret }),
@@ -33,7 +34,8 @@ export const usePaymentStore = create<PaymentState>((set) => ({
   setStatus: (status) => set({ status }),
   setError: (error) => set({ error }),
   setAmount: (amount) => set({ amount }),
-  setCurrency: (currency) => set({ currency }),
+  // Ensure currency is always lowercase for Stripe API compatibility
+  setCurrency: (currency) => set({ currency: currency.toLowerCase() }),
   setStripeReady: (isStripeReady) => set({ isStripeReady }),
   resetPayment: () =>
     set({
