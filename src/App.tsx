@@ -25,7 +25,7 @@ export type BookingData = {
 };
 
 export default function App() {
-  const [step, setStep] = useState<'search' | 'listing' | 'seats' | 'details' | 'payment' | 'confirmation' | 'logo'>('logo');
+  const [step, setStep] = useState<'search' | 'listing' | 'seats' | 'details' | 'payment' | 'confirmation' | 'logo'>('search');
   const [bookingData, setBookingData] = useState<BookingData>({
     from: 'GIKI',
     to: 'Multan',
