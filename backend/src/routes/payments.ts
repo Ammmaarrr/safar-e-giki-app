@@ -3,13 +3,92 @@ import { validate, createCheckoutSchema, verifyPaymentSchema } from '../middlewa
 import { optionalAuth, AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { safepayService, safepay } from '../services/safepay';
-import { bookings } from './bookings';
+import { bookings, Booking } from './bookings';
+import supabase from '../services/supabase';
 
 const router = Router();
 
 // Success and cancel URLs for Safepay checkout
 const getSuccessUrl = () => process.env.SAFEPAY_SUCCESS_URL || 'http://localhost:5173/payment/callback';
 const getCancelUrl = () => process.env.SAFEPAY_CANCEL_URL || 'http://localhost:5173/payment/cancelled';
+
+// Check if Supabase is configured
+const isSupabaseConfigured = (): boolean => {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && supabase);
+};
+
+// Helper to get booking from Supabase or in-memory
+const getBooking = async (bookingId: string): Promise<Booking | null> => {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase!
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .single();
+
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      userId: data.user_id,
+      routeId: data.route_id,
+      busId: data.bus_id,
+      busName: data.bus_name,
+      from: data.from_city,
+      to: data.to_city,
+      seats: data.seats,
+      passengerInfo: {
+        name: data.passenger_name,
+        phone: data.passenger_phone,
+        email: data.passenger_email || '',
+        cnic: data.passenger_cnic,
+        emergencyContact: data.passenger_emergency_contact || '',
+        gender: data.passenger_gender || '',
+        boardingPoint: data.passenger_boarding_point || '',
+        studentId: data.passenger_student_id,
+      },
+      travelDate: data.travel_date,
+      departureTime: data.departure_time,
+      totalAmount: Number(data.total_amount),
+      status: data.status,
+      paymentStatus: data.payment_status,
+      paymentTracker: data.payment_tracker,
+      paymentReference: data.payment_reference,
+      createdAt: data.created_at,
+    };
+  }
+  return bookings.get(bookingId) || null;
+};
+
+// Helper to update booking in Supabase or in-memory
+const updateBooking = async (bookingId: string, updates: Partial<{
+  paymentTracker: string;
+  paymentReference: string;
+  paymentStatus: 'pending' | 'paid' | 'refunded';
+  status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+}>): Promise<void> => {
+  if (isSupabaseConfigured()) {
+    const dbUpdates: Record<string, unknown> = {};
+    if (updates.paymentTracker !== undefined) dbUpdates.payment_tracker = updates.paymentTracker;
+    if (updates.paymentReference !== undefined) dbUpdates.payment_reference = updates.paymentReference;
+    if (updates.paymentStatus !== undefined) dbUpdates.payment_status = updates.paymentStatus;
+    if (updates.status !== undefined) dbUpdates.status = updates.status;
+
+    await supabase!
+      .from('bookings')
+      .update(dbUpdates)
+      .eq('id', bookingId);
+  } else {
+    const booking = bookings.get(bookingId);
+    if (booking) {
+      if (updates.paymentTracker !== undefined) booking.paymentTracker = updates.paymentTracker;
+      if (updates.paymentReference !== undefined) booking.paymentReference = updates.paymentReference;
+      if (updates.paymentStatus !== undefined) booking.paymentStatus = updates.paymentStatus;
+      if (updates.status !== undefined) booking.status = updates.status;
+      bookings.set(bookingId, booking);
+    }
+  }
+};
 
 // POST /api/payments/create-checkout
 router.post(
@@ -21,7 +100,7 @@ router.post(
       const { bookingId, amount, currency = 'PKR' } = req.body;
 
       // Validate booking exists
-      const booking = bookings.get(bookingId);
+      const booking = await getBooking(bookingId);
       if (!booking) {
         throw createError('Booking not found', 404);
       }
@@ -40,8 +119,7 @@ router.post(
       }
 
       // Update booking with tracker
-      booking.paymentTracker = checkout.tracker;
-      bookings.set(bookingId, booking);
+      await updateBooking(bookingId, { paymentTracker: checkout.tracker });
 
       res.json({
         checkoutUrl: checkout.checkoutUrl,
@@ -73,16 +151,14 @@ router.post(
 
       // Update booking if we have bookingId
       if (bookingId) {
-        const booking = bookings.get(bookingId);
-        if (booking) {
-          if (result.success) {
-            booking.paymentStatus = 'paid';
-            booking.status = 'confirmed';
-            booking.paymentReference = sig;
-          } else {
-            booking.status = 'pending';
-          }
-          bookings.set(bookingId, booking);
+        if (result.success) {
+          await updateBooking(bookingId, {
+            paymentStatus: 'paid',
+            status: 'confirmed',
+            paymentReference: sig,
+          });
+        } else {
+          await updateBooking(bookingId, { status: 'pending' });
         }
       }
 
@@ -102,7 +178,7 @@ router.get(
   optionalAuth,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const booking = bookings.get(req.params.bookingId);
+      const booking = await getBooking(req.params.bookingId);
 
       if (!booking) {
         throw createError('Booking not found', 404);
@@ -165,14 +241,12 @@ router.post(
         case 'payment.created': {
           const bookingId = data.order_id || data.orderId;
           if (bookingId) {
-            const booking = bookings.get(bookingId);
-            if (booking) {
-              booking.paymentStatus = 'paid';
-              booking.status = 'confirmed';
-              booking.paymentReference = data.reference || data.ref;
-              bookings.set(bookingId, booking);
-              console.log(`Payment succeeded for booking: ${bookingId}`);
-            }
+            await updateBooking(bookingId, {
+              paymentStatus: 'paid',
+              status: 'confirmed',
+              paymentReference: data.reference || data.ref,
+            });
+            console.log(`Payment succeeded for booking: ${bookingId}`);
           }
           break;
         }
@@ -181,12 +255,8 @@ router.post(
         case 'payment.failed': {
           const bookingId = data.order_id || data.orderId;
           if (bookingId) {
-            const booking = bookings.get(bookingId);
-            if (booking) {
-              booking.status = 'pending';
-              bookings.set(bookingId, booking);
-              console.log(`Payment failed for booking: ${bookingId}`);
-            }
+            await updateBooking(bookingId, { status: 'pending' });
+            console.log(`Payment failed for booking: ${bookingId}`);
           }
           break;
         }

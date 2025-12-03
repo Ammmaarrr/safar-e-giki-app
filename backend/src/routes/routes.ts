@@ -1,9 +1,10 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import supabase from '../services/supabase';
 
 const router = Router();
 
-// Mock routes data
-const routes = [
+// Mock routes data (fallback when Supabase is not configured)
+const routesMemory = [
   {
     id: 'giki-multan',
     from: 'GIKI',
@@ -20,8 +21,8 @@ const routes = [
   },
 ];
 
-// Mock bus data
-const buses = [
+// Mock bus data (fallback)
+const busesMemory = [
   {
     id: 1,
     name: 'Safar e GIKI Express',
@@ -60,11 +61,18 @@ const buses = [
   },
 ];
 
+// Check if Supabase is configured
+const isSupabaseConfigured = (): boolean => {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && supabase);
+};
+
 // Mock seat data generator
-const generateSeats = (totalSeats: number) => {
-  const bookedSeats = [3, 7, 12, 15, 21, 28, 33].filter((s) => s <= totalSeats);
+const generateSeats = (totalSeats: number, bookedSeatsArray: number[] = []) => {
+  const defaultBookedSeats = [3, 7, 12, 15, 21, 28, 33].filter((s) => s <= totalSeats);
   const femaleSeats = [5, 18, 24].filter((s) => s <= totalSeats);
   const maleSeats = [8, 16, 29].filter((s) => s <= totalSeats);
+
+  const bookedSeats = bookedSeatsArray.length > 0 ? bookedSeatsArray : defaultBookedSeats;
 
   const seats = [];
   for (let i = 1; i <= totalSeats; i++) {
@@ -79,44 +87,161 @@ const generateSeats = (totalSeats: number) => {
 };
 
 // GET /api/routes - Search routes
-router.get('/', (req: Request, res: Response) => {
-  const { from, to, date } = req.query;
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { from, to, date } = req.query;
 
-  let filteredRoutes = routes;
+    if (isSupabaseConfigured()) {
+      let query = supabase!
+        .from('routes')
+        .select(`
+          *,
+          buses (
+            id,
+            name,
+            operator,
+            bus_type,
+            total_seats,
+            amenities,
+            image_url
+          )
+        `);
 
-  if (from) {
-    filteredRoutes = filteredRoutes.filter(
-      (r) => r.from.toLowerCase() === String(from).toLowerCase()
-    );
+      if (from) {
+        query = query.ilike('from_city', String(from));
+      }
+
+      if (to) {
+        query = query.ilike('to_city', String(to));
+      }
+
+      const { data: routes, error } = await query;
+
+      if (error) {
+        console.error('Supabase error fetching routes:', error);
+        throw new Error('Failed to fetch routes');
+      }
+
+      // Group routes by from/to and transform
+      const routeGroups: Record<string, {
+        id: string;
+        from: string;
+        to: string;
+        distance: string;
+        estimatedTime: string;
+        buses: typeof busesMemory;
+        date: string;
+      }> = {};
+
+      routes.forEach((route) => {
+        const groupKey = `${route.from_city.toLowerCase()}-${route.to_city.toLowerCase()}`;
+        
+        if (!routeGroups[groupKey]) {
+          routeGroups[groupKey] = {
+            id: groupKey,
+            from: route.from_city,
+            to: route.to_city,
+            distance: '450 km', // Default distance
+            estimatedTime: route.duration,
+            buses: [],
+            date: date ? String(date) : new Date().toISOString().split('T')[0],
+          };
+        }
+
+        routeGroups[groupKey].buses.push({
+          id: route.buses.id,
+          name: route.buses.name,
+          departureTime: route.departure_time,
+          arrivalTime: route.arrival_time,
+          duration: route.duration,
+          price: Number(route.price),
+          seatsAvailable: route.buses.total_seats,
+          totalSeats: route.buses.total_seats,
+          type: route.buses.bus_type,
+          amenities: route.buses.amenities || [],
+        });
+      });
+
+      res.json(Object.values(routeGroups));
+    } else {
+      // Fallback to in-memory data
+      let filteredRoutes = routesMemory;
+
+      if (from) {
+        filteredRoutes = filteredRoutes.filter(
+          (r) => r.from.toLowerCase() === String(from).toLowerCase()
+        );
+      }
+
+      if (to) {
+        filteredRoutes = filteredRoutes.filter(
+          (r) => r.to.toLowerCase() === String(to).toLowerCase()
+        );
+      }
+
+      // Return routes with available buses
+      const routesWithBuses = filteredRoutes.map((route) => ({
+        ...route,
+        buses: busesMemory,
+        date: date || new Date().toISOString().split('T')[0],
+      }));
+
+      res.json(routesWithBuses);
+    }
+  } catch (error) {
+    next(error);
   }
-
-  if (to) {
-    filteredRoutes = filteredRoutes.filter(
-      (r) => r.to.toLowerCase() === String(to).toLowerCase()
-    );
-  }
-
-  // Return routes with available buses
-  const routesWithBuses = filteredRoutes.map((route) => ({
-    ...route,
-    buses: buses,
-    date: date || new Date().toISOString().split('T')[0],
-  }));
-
-  res.json(routesWithBuses);
 });
 
 // GET /api/routes/:id/seats - Get available seats for a route
-router.get('/:id/seats', (req: Request, res: Response) => {
-  const { busId } = req.query;
+router.get('/:id/seats', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { busId, date } = req.query;
+    const busIdNum = parseInt(String(busId));
 
-  const bus = buses.find((b) => b.id === parseInt(String(busId)));
-  if (!bus) {
-    return res.status(404).json({ message: 'Bus not found' });
+    if (isSupabaseConfigured()) {
+      // Get bus info
+      const { data: bus, error: busError } = await supabase!
+        .from('buses')
+        .select('total_seats')
+        .eq('id', busIdNum)
+        .single();
+
+      if (busError || !bus) {
+        return res.status(404).json({ message: 'Bus not found' });
+      }
+
+      // Get booked seats for this bus and date
+      let bookedSeats: number[] = [];
+      
+      if (date) {
+        const { data: bookings } = await supabase!
+          .from('bookings')
+          .select('seats')
+          .eq('bus_id', busIdNum)
+          .eq('travel_date', String(date))
+          .in('status', ['pending', 'confirmed']);
+
+        if (bookings) {
+          bookedSeats = bookings.flatMap((b) => b.seats || []);
+        }
+      }
+
+      const seats = generateSeats(bus.total_seats, bookedSeats);
+      res.json(seats);
+    } else {
+      // Fallback to in-memory data
+      const bus = busesMemory.find((b) => b.id === busIdNum);
+      if (!bus) {
+        return res.status(404).json({ message: 'Bus not found' });
+      }
+
+      const seats = generateSeats(bus.totalSeats);
+      res.json(seats);
+    }
+  } catch (error) {
+    next(error);
   }
-
-  const seats = generateSeats(bus.totalSeats);
-  res.json(seats);
 });
 
 export default router;
