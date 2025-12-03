@@ -71,3 +71,19 @@ export const createPaymentIntentSchema = z.object({
     currency: z.string().optional(),
   }),
 });
+
+export const createCheckoutSchema = z.object({
+  body: z.object({
+    bookingId: z.string(),
+    amount: z.number().positive(),
+    currency: z.string().optional(),
+  }),
+});
+
+export const verifyPaymentSchema = z.object({
+  body: z.object({
+    tracker: z.string(),
+    sig: z.string(),
+    bookingId: z.string().optional(),
+  }),
+});

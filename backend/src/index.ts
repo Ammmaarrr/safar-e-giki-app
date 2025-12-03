@@ -23,8 +23,8 @@ app.use(cors({
 // Apply general rate limiting to all API routes
 app.use('/api', apiLimiter);
 
-// Raw body for Stripe webhooks
-app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
+// Raw body for Safepay webhooks
+app.use('/api/webhooks/safepay', express.raw({ type: 'application/json' }));
 
 // JSON body parser for other routes
 app.use(express.json());

@@ -7,7 +7,7 @@ A comprehensive bus ticket booking application built for GIKI students to book s
 - 🔍 Search for available buses and routes
 - 💺 Interactive seat selection
 - 👤 Passenger information management
-- 💳 Secure payment processing with Stripe
+- 💳 Secure payment processing with Safepay (Pakistan's payment gateway)
 - 📱 Responsive design for mobile and desktop
 - 🎫 Digital ticket generation
 
@@ -18,14 +18,14 @@ A comprehensive bus ticket booking application built for GIKI students to book s
 - **Vite** for development and building
 - **Zustand** for state management
 - **React Query** for server state management
-- **Stripe Elements** for payment processing
+- **Safepay** for payment processing
 - **Tailwind CSS** for styling
 - **React Router** for navigation
 
 ### Backend
 - **Node.js** with Express
 - **TypeScript**
-- **Stripe SDK** for payment processing
+- **Safepay SDK** for payment processing
 - **JWT** for authentication
 - **Zod** for validation
 
@@ -34,7 +34,7 @@ A comprehensive bus ticket booking application built for GIKI students to book s
 ### Prerequisites
 - Node.js 18+ installed
 - npm or yarn package manager
-- Stripe account (for payment testing)
+- Safepay account (for payment testing)
 
 ### Installation
 
@@ -69,27 +69,62 @@ cp .env.example .env
 #### Frontend (.env in root)
 ```env
 VITE_API_BASE_URL=http://localhost:3001/api
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
+VITE_APP_URL=http://localhost:5173
 ```
 
 #### Backend (backend/.env)
 ```env
 PORT=3001
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:5173
 JWT_SECRET=your-super-secret-jwt-key
-STRIPE_SECRET_KEY=sk_test_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+SAFEPAY_API_KEY=sec_xxxxx
+SAFEPAY_API_SECRET=xxxxx
+SAFEPAY_WEBHOOK_SECRET=xxxxx
+SAFEPAY_SANDBOX=true
+SAFEPAY_SUCCESS_URL=http://localhost:5173/payment/callback
+SAFEPAY_CANCEL_URL=http://localhost:5173/payment/cancelled
 ```
 
-### Getting Stripe Test API Keys
+## Payment Integration (Safepay)
 
-1. Create a [Stripe account](https://dashboard.stripe.com/register) (free)
-2. Go to [Stripe Dashboard > Developers > API Keys](https://dashboard.stripe.com/test/apikeys)
-3. Copy the **Publishable key** (starts with `pk_test_`)
-4. Copy the **Secret key** (starts with `sk_test_`)
-5. For webhook secret, either:
-   - Use Stripe CLI: `stripe listen --forward-to localhost:3001/api/webhooks/stripe`
-   - Or create a webhook endpoint in Stripe Dashboard
+This app uses [Safepay](https://getsafepay.com) for payment processing in Pakistan.
+
+### Supported Payment Methods
+- 💳 Visa, MasterCard, PayPak debit/credit cards
+- 📱 JazzCash mobile wallet
+- 📱 EasyPaisa mobile wallet
+- 🏦 Bank transfers via Raast
+
+### Setting Up Safepay
+
+1. Create a Safepay account at [getsafepay.com](https://getsafepay.com)
+2. Get your sandbox API keys from the dashboard
+3. Add keys to your `.env` file:
+   ```
+   SAFEPAY_API_KEY=your-api-key
+   SAFEPAY_API_SECRET=your-api-secret
+   SAFEPAY_SANDBOX=true
+   ```
+
+### Testing Payments (Sandbox Mode)
+
+Use these test credentials in sandbox mode:
+- **Test Card:** 4242 4242 4242 4242
+- **Expiry:** Any future date
+- **CVV:** Any 3 digits
+- **OTP:** 123456
+
+### Going Live
+
+1. Complete Safepay merchant onboarding
+2. Get production API keys
+3. Update `.env`:
+   ```
+   SAFEPAY_SANDBOX=false
+   SAFEPAY_API_KEY=your-production-key
+   SAFEPAY_API_SECRET=your-production-secret
+   ```
+4. Update callback URLs to your production domain
 
 ### Running the Application
 
@@ -104,33 +139,7 @@ npm run dev
 npm run dev
 ```
 
-3. Open [http://localhost:3000](http://localhost:3000) in your browser
-
-## Stripe Sandbox Testing
-
-### Test Card Numbers
-
-Use these test cards in sandbox mode (no real charges):
-
-| Card Number | Description |
-|-------------|-------------|
-| `4242 4242 4242 4242` | ✓ Successful payment |
-| `4000 0000 0000 9995` | ✗ Declined payment (insufficient funds) |
-| `4000 0025 0000 3155` | 🔐 Requires 3D Secure authentication |
-
-**For all test cards:**
-- Use any future expiration date (e.g., 12/34)
-- Use any 3-digit CVC (e.g., 123)
-- Use any 5-digit ZIP code (e.g., 12345)
-
-### Testing Webhooks Locally
-
-Install [Stripe CLI](https://stripe.com/docs/stripe-cli) and run:
-```bash
-stripe listen --forward-to localhost:3001/api/webhooks/stripe
-```
-
-This will give you a webhook secret to add to your `.env` file.
+3. Open [http://localhost:5173](http://localhost:5173) in your browser
 
 ## Available Scripts
 
@@ -170,20 +179,24 @@ npm start            # Start production server
 - `PUT /api/bookings/:id/cancel` - Cancel a booking
 
 ### Payments
-- `POST /api/payments/create-payment-intent` - Create Stripe PaymentIntent
-- `POST /api/payments/confirm` - Confirm payment
+- `POST /api/payments/create-checkout` - Create Safepay checkout session
+- `POST /api/payments/verify` - Verify payment after checkout
 - `GET /api/payments/:bookingId` - Get payment status
-- `POST /api/webhooks/stripe` - Stripe webhook handler
+- `POST /api/webhooks/safepay` - Safepay webhook handler
 
 ## Payment Flow
 
-1. User completes booking form and selects seats
-2. Frontend calls `/api/payments/create-payment-intent` with booking details
-3. Backend creates a Stripe PaymentIntent and returns `clientSecret`
-4. Frontend uses Stripe Elements to collect card details
-5. User confirms payment via Stripe's secure form
-6. On success, frontend calls `/api/payments/confirm` to update booking status
-7. Stripe webhook receives `payment_intent.succeeded` event as backup confirmation
+```
+1. User clicks "Pay Now"
+2. Frontend calls POST /api/payments/create-checkout
+3. Backend creates Safepay checkout session
+4. Backend returns checkout URL
+5. Frontend redirects user to Safepay checkout page
+6. User pays via Card/JazzCash/EasyPaisa
+7. Safepay redirects back to your app
+8. Frontend calls POST /api/payments/verify
+9. Backend verifies payment and updates booking
+```
 
 ## Project Structure
 
@@ -192,7 +205,7 @@ safar-e-giki-app/
 ├── src/                    # Frontend source code
 │   ├── api/               # API client and service modules
 │   ├── components/        # React components
-│   │   ├── payment/       # Stripe payment components
+│   │   ├── payment/       # Safepay payment components
 │   │   └── ui/            # UI components
 │   ├── stores/            # Zustand stores
 │   └── test/              # Test setup and utilities
@@ -200,7 +213,7 @@ safar-e-giki-app/
 │   └── src/
 │       ├── routes/        # API route handlers
 │       ├── middleware/    # Express middleware
-│       ├── services/      # Business logic (Stripe, etc.)
+│       ├── services/      # Business logic (Safepay, etc.)
 │       └── utils/         # Utility functions
 ├── .env.example           # Environment variables template
 └── README.md
@@ -209,9 +222,10 @@ safar-e-giki-app/
 ## Security Notes
 
 - **Never commit real API keys** - Always use test/sandbox keys for development
-- Card data is **never** handled by our servers - Stripe Elements handles all sensitive data
+- Card data is **never** handled by our servers - Safepay handles all sensitive data
 - JWT tokens expire after 7 days
 - All API endpoints validate input using Zod schemas
+- Webhook signatures are verified to ensure authenticity
 
 ## Contributing
 

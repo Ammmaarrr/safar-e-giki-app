@@ -1,20 +1,24 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { validate, createPaymentIntentSchema } from '../middleware/validation';
+import { validate, createCheckoutSchema, verifyPaymentSchema } from '../middleware/validation';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
-import { stripeService, getStripeWebhookSecret, stripe } from '../services/stripe';
+import { safepayService, safepay } from '../services/safepay';
 import { bookings } from './bookings';
 
 const router = Router();
 
-// POST /api/payments/create-payment-intent
+// Success and cancel URLs for Safepay checkout
+const getSuccessUrl = () => process.env.SAFEPAY_SUCCESS_URL || 'http://localhost:5173/payment/callback';
+const getCancelUrl = () => process.env.SAFEPAY_CANCEL_URL || 'http://localhost:5173/payment/cancelled';
+
+// POST /api/payments/create-checkout
 router.post(
-  '/create-payment-intent',
+  '/create-checkout',
   optionalAuth,
-  validate(createPaymentIntentSchema),
+  validate(createCheckoutSchema),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { bookingId, amount, currency = 'pkr' } = req.body;
+      const { bookingId, amount, currency = 'PKR' } = req.body;
 
       // Validate booking exists
       const booking = bookings.get(bookingId);
@@ -22,27 +26,28 @@ router.post(
         throw createError('Booking not found', 404);
       }
 
-      // Create payment intent
-      const paymentIntent = await stripeService.createPaymentIntent({
+      // Create Safepay checkout session
+      const checkout = await safepayService.createCheckout({
         amount,
         currency,
         bookingId,
-        customerEmail: booking.passengerInfo.email || undefined,
+        successUrl: `${getSuccessUrl()}?bookingId=${bookingId}`,
+        cancelUrl: `${getCancelUrl()}?bookingId=${bookingId}`,
       });
 
-      if (!paymentIntent) {
-        throw createError('Failed to create payment intent', 500);
+      if (!checkout) {
+        throw createError('Failed to create checkout session', 500);
       }
 
-      // Update booking with payment intent ID
-      booking.paymentIntentId = paymentIntent.id;
+      // Update booking with tracker
+      booking.paymentTracker = checkout.tracker;
       bookings.set(bookingId, booking);
 
       res.json({
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id,
-        amount: paymentIntent.amount / 100, // Convert from smallest unit
-        currency: paymentIntent.currency,
+        checkoutUrl: checkout.checkoutUrl,
+        tracker: checkout.tracker,
+        amount,
+        currency: currency.toUpperCase(),
       });
     } catch (error) {
       next(error);
@@ -50,46 +55,41 @@ router.post(
   }
 );
 
-// POST /api/payments/confirm
+// POST /api/payments/verify
 router.post(
-  '/confirm',
+  '/verify',
   optionalAuth,
+  validate(verifyPaymentSchema),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { paymentIntentId, bookingId } = req.body;
+      const { tracker, sig, bookingId } = req.body;
 
-      if (!paymentIntentId || !bookingId) {
-        throw createError('Payment intent ID and booking ID are required', 400);
+      if (!tracker || !sig) {
+        throw createError('Tracker and signature are required', 400);
       }
 
-      // Retrieve payment intent from Stripe
-      const paymentIntent = await stripeService.retrievePaymentIntent(paymentIntentId);
+      // Verify payment with Safepay
+      const result = safepayService.verifyPayment({ tracker, signature: sig });
 
-      if (!paymentIntent) {
-        throw createError('Payment intent not found', 404);
+      // Update booking if we have bookingId
+      if (bookingId) {
+        const booking = bookings.get(bookingId);
+        if (booking) {
+          if (result.success) {
+            booking.paymentStatus = 'paid';
+            booking.status = 'confirmed';
+            booking.paymentReference = sig;
+          } else {
+            booking.status = 'pending';
+          }
+          bookings.set(bookingId, booking);
+        }
       }
 
-      // Update booking based on payment status
-      const booking = bookings.get(bookingId);
-      if (!booking) {
-        throw createError('Booking not found', 404);
-      }
-
-      if (paymentIntent.status === 'succeeded') {
-        booking.paymentStatus = 'paid';
-        booking.status = 'confirmed';
-        bookings.set(bookingId, booking);
-
-        res.json({
-          success: true,
-          message: 'Payment confirmed successfully',
-        });
-      } else {
-        res.json({
-          success: false,
-          message: `Payment status: ${paymentIntent.status}`,
-        });
-      }
+      res.json({
+        success: result.success,
+        message: result.success ? 'Payment verified successfully' : 'Payment verification failed',
+      });
     } catch (error) {
       next(error);
     }
@@ -110,33 +110,16 @@ router.get(
 
       let paymentStatus: 'pending' | 'processing' | 'succeeded' | 'failed' | 'cancelled' = 'pending';
 
-      if (booking.paymentIntentId) {
-        const paymentIntent = await stripeService.retrievePaymentIntent(booking.paymentIntentId);
-        if (paymentIntent) {
-          switch (paymentIntent.status) {
-            case 'succeeded':
-              paymentStatus = 'succeeded';
-              break;
-            case 'processing':
-              paymentStatus = 'processing';
-              break;
-            case 'canceled':
-              paymentStatus = 'cancelled';
-              break;
-            case 'requires_payment_method':
-            case 'requires_confirmation':
-            case 'requires_action':
-              paymentStatus = 'pending';
-              break;
-            default:
-              paymentStatus = 'pending';
-          }
-        }
+      if (booking.paymentStatus === 'paid') {
+        paymentStatus = 'succeeded';
+      } else if (booking.paymentTracker) {
+        paymentStatus = 'processing';
       }
 
       res.json({
         status: paymentStatus,
-        paymentIntentId: booking.paymentIntentId || null,
+        tracker: booking.paymentTracker || null,
+        paymentReference: booking.paymentReference || null,
         amount: booking.totalAmount,
         paidAt: booking.paymentStatus === 'paid' ? booking.createdAt : null,
       });
@@ -146,35 +129,47 @@ router.get(
   }
 );
 
-// POST /api/webhooks/stripe - Stripe webhook handler
+// POST /api/webhooks/safepay - Safepay webhook handler
 router.post(
-  '/webhooks/stripe',
+  '/webhooks/safepay',
   async (req: Request, res: Response, next: NextFunction) => {
-    const sig = req.headers['stripe-signature'] as string;
+    const signature = req.headers['x-sfpy-signature'] as string | undefined;
 
-    if (!sig) {
-      return res.status(400).json({ error: 'Missing stripe-signature header' });
+    if (!signature) {
+      return res.status(400).json({ error: 'Missing x-sfpy-signature header' });
     }
 
     try {
-      const webhookSecret = getStripeWebhookSecret();
-      if (!webhookSecret || !stripe) {
-        throw createError('Stripe webhook not configured', 500);
+      if (!safepay) {
+        throw createError('Safepay webhook not configured', 500);
       }
 
-      const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+      // Verify webhook signature using the SDK
+      const isValid = safepayService.verifyWebhook({
+        body: req.body,
+        headers: { 'x-sfpy-signature': signature },
+      });
 
-      // Handle the event
-      switch (event.type) {
-        case 'payment_intent.succeeded': {
-          const paymentIntent = event.data.object;
-          const bookingId = paymentIntent.metadata?.bookingId;
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid webhook signature' });
+      }
 
+      const event = req.body;
+
+      // Handle the webhook event
+      const eventType = event.type || event.event;
+      const data = event.data || event;
+
+      switch (eventType) {
+        case 'payment:created':
+        case 'payment.created': {
+          const bookingId = data.order_id || data.orderId;
           if (bookingId) {
             const booking = bookings.get(bookingId);
             if (booking) {
               booking.paymentStatus = 'paid';
               booking.status = 'confirmed';
+              booking.paymentReference = data.reference || data.ref;
               bookings.set(bookingId, booking);
               console.log(`Payment succeeded for booking: ${bookingId}`);
             }
@@ -182,10 +177,9 @@ router.post(
           break;
         }
 
-        case 'payment_intent.payment_failed': {
-          const paymentIntent = event.data.object;
-          const bookingId = paymentIntent.metadata?.bookingId;
-
+        case 'payment:failed':
+        case 'payment.failed': {
+          const bookingId = data.order_id || data.orderId;
           if (bookingId) {
             const booking = bookings.get(bookingId);
             if (booking) {
@@ -198,12 +192,12 @@ router.post(
         }
 
         default:
-          console.log(`Unhandled event type: ${event.type}`);
+          console.log(`Unhandled Safepay event type: ${eventType}`);
       }
 
       res.json({ received: true });
     } catch (error) {
-      console.error('Webhook error:', error);
+      console.error('Safepay webhook error:', error);
       next(error);
     }
   }
