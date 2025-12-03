@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { validateQuery, validateParams } from '../middleware/validation.js';
+import { validateQuery } from '../middleware/validation.js';
 import { buses, generateSeats } from '../utils/store.js';
 
 const router = Router();
@@ -11,18 +11,39 @@ const searchRoutesSchema = z.object({
   date: z.string().optional(),
 });
 
-const idParamSchema = z.object({
-  id: z.string().transform((val) => parseInt(val, 10)),
-});
-
 // GET /api/buses - List all buses
-router.get('/', (req, res) => {
-  res.json(buses);
+// GET /api/routes - Search routes (when mounted at /api/routes)
+router.get('/', validateQuery(searchRoutesSchema), (req, res) => {
+  const { from, to, date } = req.query as { from?: string; to?: string; date?: string };
+
+  // Filter buses based on search parameters
+  // In a real app with a database, this would be a proper query
+  let filteredBuses = [...buses];
+
+  // For now, we return all buses as they all operate on the route
+  // In production, this would filter by actual route schedules
+  if (from && to) {
+    // Mock filtering - in production, match against route data
+    filteredBuses = buses;
+  }
+
+  if (date) {
+    // Mock filtering - in production, check availability for the date
+    filteredBuses = filteredBuses;
+  }
+
+  res.json(filteredBuses);
 });
 
 // GET /api/buses/:id - Get bus by ID
-router.get('/:id', validateParams(idParamSchema), (req, res) => {
+router.get('/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
+  
+  if (isNaN(id)) {
+    res.status(400).json({ message: 'Invalid bus ID' });
+    return;
+  }
+
   const bus = buses.find((b) => b.id === id);
 
   if (!bus) {
@@ -33,28 +54,15 @@ router.get('/:id', validateParams(idParamSchema), (req, res) => {
   res.json(bus);
 });
 
-// GET /api/routes - Search routes (also available buses)
-router.get('/search', validateQuery(searchRoutesSchema), (req, res) => {
-  // For now, return all buses as available routes
-  // In a real app, this would filter based on from, to, and date
-  const { from, to, date } = req.query;
-
-  // Simple filtering logic
-  let filteredBuses = [...buses];
-
-  // If search parameters are provided, we return all buses
-  // In production, this would query actual route schedules
-  if (from || to || date) {
-    // Mock: Just return all buses as they all operate on the route
-    filteredBuses = buses;
+// GET /api/routes/:id/seats - Get available seats for a route/bus
+router.get('/:id/seats', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  
+  if (isNaN(id)) {
+    res.status(400).json({ message: 'Invalid route ID' });
+    return;
   }
 
-  res.json(filteredBuses);
-});
-
-// GET /api/routes/:id/seats - Get available seats for a route/bus
-router.get('/:id/seats', validateParams(idParamSchema), (req, res) => {
-  const id = parseInt(req.params.id, 10);
   const bus = buses.find((b) => b.id === id);
 
   if (!bus) {

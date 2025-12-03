@@ -5,6 +5,7 @@ import authRoutes from './routes/auth.js';
 import busRoutes from './routes/buses.js';
 import bookingRoutes from './routes/bookings.js';
 import paymentRoutes from './routes/payments.js';
+import { generalLimiter, authLimiter, bookingLimiter, paymentLimiter } from './middleware/rateLimit.js';
 
 dotenv.config();
 
@@ -18,17 +19,20 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Apply general rate limiting to all API routes
+app.use('/api', generalLimiter);
+
 // Health check
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
+// API Routes with specific rate limiters
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/buses', busRoutes);
 app.use('/api/routes', busRoutes); // Routes endpoints use same controller
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/payments', paymentRoutes);
+app.use('/api/bookings', bookingLimiter, bookingRoutes);
+app.use('/api/payments', paymentLimiter, paymentRoutes);
 
 // 404 handler
 app.use((_req, res) => {
