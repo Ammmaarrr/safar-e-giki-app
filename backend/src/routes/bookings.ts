@@ -50,34 +50,62 @@ const isSupabaseConfigured = (): boolean => {
   return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && supabase);
 };
 
+// Database booking record interface
+interface DbBooking {
+  id: string;
+  user_id: string | null;
+  route_id: string;
+  bus_id: number;
+  bus_name: string;
+  from_city: string;
+  to_city: string;
+  seats: number[];
+  passenger_name: string;
+  passenger_phone: string;
+  passenger_email: string | null;
+  passenger_cnic: string;
+  passenger_emergency_contact: string | null;
+  passenger_gender: string | null;
+  passenger_boarding_point: string | null;
+  passenger_student_id: string | null;
+  travel_date: string;
+  departure_time: string;
+  total_amount: number | string;
+  status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+  payment_status: 'pending' | 'paid' | 'refunded';
+  payment_tracker: string | null;
+  payment_reference: string | null;
+  created_at: string;
+}
+
 // Helper to transform DB booking to API format
-const transformDbBooking = (dbBooking: Record<string, unknown>): Booking => ({
-  id: dbBooking.id as string,
-  userId: dbBooking.user_id as string | undefined,
-  routeId: dbBooking.route_id as string,
-  busId: dbBooking.bus_id as number,
-  busName: dbBooking.bus_name as string,
-  from: dbBooking.from_city as string,
-  to: dbBooking.to_city as string,
-  seats: dbBooking.seats as number[],
+const transformDbBooking = (dbBooking: DbBooking): Booking => ({
+  id: dbBooking.id,
+  userId: dbBooking.user_id || undefined,
+  routeId: dbBooking.route_id,
+  busId: dbBooking.bus_id,
+  busName: dbBooking.bus_name,
+  from: dbBooking.from_city,
+  to: dbBooking.to_city,
+  seats: dbBooking.seats,
   passengerInfo: {
-    name: dbBooking.passenger_name as string,
-    phone: dbBooking.passenger_phone as string,
-    email: (dbBooking.passenger_email as string) || '',
-    cnic: dbBooking.passenger_cnic as string,
-    emergencyContact: (dbBooking.passenger_emergency_contact as string) || '',
-    gender: (dbBooking.passenger_gender as string) || '',
-    boardingPoint: (dbBooking.passenger_boarding_point as string) || '',
-    studentId: dbBooking.passenger_student_id as string | undefined,
+    name: dbBooking.passenger_name,
+    phone: dbBooking.passenger_phone,
+    email: dbBooking.passenger_email || '',
+    cnic: dbBooking.passenger_cnic,
+    emergencyContact: dbBooking.passenger_emergency_contact || '',
+    gender: dbBooking.passenger_gender || '',
+    boardingPoint: dbBooking.passenger_boarding_point || '',
+    studentId: dbBooking.passenger_student_id || undefined,
   },
-  travelDate: dbBooking.travel_date as string,
-  departureTime: dbBooking.departure_time as string,
+  travelDate: dbBooking.travel_date,
+  departureTime: dbBooking.departure_time,
   totalAmount: Number(dbBooking.total_amount),
-  status: dbBooking.status as Booking['status'],
-  paymentStatus: dbBooking.payment_status as Booking['paymentStatus'],
-  paymentTracker: dbBooking.payment_tracker as string | undefined,
-  paymentReference: dbBooking.payment_reference as string | undefined,
-  createdAt: dbBooking.created_at as string,
+  status: dbBooking.status,
+  paymentStatus: dbBooking.payment_status,
+  paymentTracker: dbBooking.payment_tracker || undefined,
+  paymentReference: dbBooking.payment_reference || undefined,
+  createdAt: dbBooking.created_at,
 });
 
 // POST /api/bookings - Create a new booking

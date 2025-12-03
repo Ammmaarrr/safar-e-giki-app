@@ -21,8 +21,22 @@ const routesMemory = [
   },
 ];
 
+// Bus interface for route responses
+interface RouteBus {
+  id: number;
+  name: string;
+  departureTime: string;
+  arrivalTime: string;
+  duration: string;
+  price: number;
+  seatsAvailable: number;
+  totalSeats: number;
+  type: string;
+  amenities: string[];
+}
+
 // Mock bus data (fallback)
-const busesMemory = [
+const busesMemory: RouteBus[] = [
   {
     id: 1,
     name: 'Safar e GIKI Express',
@@ -129,7 +143,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         to: string;
         distance: string;
         estimatedTime: string;
-        buses: typeof busesMemory;
+        buses: RouteBus[];
         date: string;
       }> = {};
 
