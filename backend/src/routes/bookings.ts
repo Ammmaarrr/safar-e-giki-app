@@ -30,7 +30,8 @@ export interface Booking {
   totalAmount: number;
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
   paymentStatus: 'pending' | 'paid' | 'refunded';
-  paymentIntentId?: string;
+  paymentTracker?: string;
+  paymentReference?: string;
   createdAt: string;
 }
 

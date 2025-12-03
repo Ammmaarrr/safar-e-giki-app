@@ -1,43 +1,50 @@
 import { apiClient, handleApiError } from './client';
 
-export interface CreatePaymentIntentRequest {
+export interface CreateCheckoutRequest {
   bookingId: string;
   amount: number;
   currency?: string;
 }
 
-export interface PaymentIntentResponse {
-  clientSecret: string;
-  paymentIntentId: string;
+export interface CheckoutResponse {
+  checkoutUrl: string;
+  tracker: string;
   amount: number;
   currency: string;
 }
 
-export interface ConfirmPaymentRequest {
-  paymentIntentId: string;
-  bookingId: string;
+export interface VerifyPaymentRequest {
+  tracker: string;
+  sig: string;
+  bookingId?: string;
+}
+
+export interface VerifyPaymentResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface PaymentStatusResponse {
   status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
-  paymentIntentId: string | null;
+  tracker: string | null;
+  paymentReference: string | null;
   amount: number;
   paidAt: string | null;
 }
 
 export const paymentsApi = {
-  createPaymentIntent: async (data: CreatePaymentIntentRequest): Promise<PaymentIntentResponse> => {
+  createCheckout: async (data: CreateCheckoutRequest): Promise<CheckoutResponse> => {
     try {
-      const response = await apiClient.post<PaymentIntentResponse>('/payments/create-payment-intent', data);
+      const response = await apiClient.post<CheckoutResponse>('/payments/create-checkout', data);
       return response.data;
     } catch (error) {
       throw handleApiError(error);
     }
   },
 
-  confirmPayment: async (data: ConfirmPaymentRequest): Promise<{ success: boolean; message: string }> => {
+  verify: async (data: VerifyPaymentRequest): Promise<VerifyPaymentResponse> => {
     try {
-      const response = await apiClient.post<{ success: boolean; message: string }>('/payments/confirm', data);
+      const response = await apiClient.post<VerifyPaymentResponse>('/payments/verify', data);
       return response.data;
     } catch (error) {
       throw handleApiError(error);

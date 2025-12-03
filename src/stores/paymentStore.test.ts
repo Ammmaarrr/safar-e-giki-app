@@ -6,33 +6,22 @@ describe('paymentStore', () => {
   it('should initialize with default values', () => {
     const { result } = renderHook(() => usePaymentStore());
 
-    expect(result.current.clientSecret).toBeNull();
-    expect(result.current.paymentIntentId).toBeNull();
+    expect(result.current.tracker).toBeNull();
     expect(result.current.status).toBe('idle');
     expect(result.current.error).toBeNull();
     expect(result.current.amount).toBe(0);
-    expect(result.current.currency).toBe('pkr');
-    expect(result.current.isStripeReady).toBe(false);
+    expect(result.current.currency).toBe('PKR');
+    expect(result.current.isProcessing).toBe(false);
   });
 
-  it('should set client secret', () => {
+  it('should set tracker', () => {
     const { result } = renderHook(() => usePaymentStore());
 
     act(() => {
-      result.current.setClientSecret('pi_test_secret');
+      result.current.setTracker('tracker_test_123');
     });
 
-    expect(result.current.clientSecret).toBe('pi_test_secret');
-  });
-
-  it('should set payment intent id', () => {
-    const { result } = renderHook(() => usePaymentStore());
-
-    act(() => {
-      result.current.setPaymentIntentId('pi_test_123');
-    });
-
-    expect(result.current.paymentIntentId).toBe('pi_test_123');
+    expect(result.current.tracker).toBe('tracker_test_123');
   });
 
   it('should set status', () => {
@@ -72,17 +61,17 @@ describe('paymentStore', () => {
       result.current.setCurrency('usd');
     });
 
-    expect(result.current.currency).toBe('usd');
+    expect(result.current.currency).toBe('USD');
   });
 
-  it('should set stripe ready', () => {
+  it('should set processing state', () => {
     const { result } = renderHook(() => usePaymentStore());
 
     act(() => {
-      result.current.setStripeReady(true);
+      result.current.setProcessing(true);
     });
 
-    expect(result.current.isStripeReady).toBe(true);
+    expect(result.current.isProcessing).toBe(true);
   });
 
   it('should reset payment state', () => {
@@ -90,11 +79,11 @@ describe('paymentStore', () => {
 
     // Set some values
     act(() => {
-      result.current.setClientSecret('pi_test_secret');
-      result.current.setPaymentIntentId('pi_test_123');
+      result.current.setTracker('tracker_test_123');
       result.current.setStatus('succeeded');
       result.current.setAmount(5000);
       result.current.setError('Some error');
+      result.current.setProcessing(true);
     });
 
     // Reset
@@ -102,10 +91,10 @@ describe('paymentStore', () => {
       result.current.resetPayment();
     });
 
-    expect(result.current.clientSecret).toBeNull();
-    expect(result.current.paymentIntentId).toBeNull();
+    expect(result.current.tracker).toBeNull();
     expect(result.current.status).toBe('idle');
     expect(result.current.error).toBeNull();
     expect(result.current.amount).toBe(0);
+    expect(result.current.isProcessing).toBe(false);
   });
 });
