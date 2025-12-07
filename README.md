@@ -77,6 +77,13 @@ VITE_APP_URL=http://localhost:5173
 PORT=3001
 FRONTEND_URL=http://localhost:5173
 JWT_SECRET=your-super-secret-jwt-key
+
+# Supabase Configuration
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Safepay Configuration
 SAFEPAY_API_KEY=sec_xxxxx
 SAFEPAY_API_SECRET=xxxxx
 SAFEPAY_WEBHOOK_SECRET=xxxxx
@@ -84,6 +91,41 @@ SAFEPAY_SANDBOX=true
 SAFEPAY_SUCCESS_URL=http://localhost:5173/payment/callback
 SAFEPAY_CANCEL_URL=http://localhost:5173/payment/cancelled
 ```
+
+## Database Setup (Supabase)
+
+This app uses [Supabase](https://supabase.com) as the database backend. Follow these steps to set up:
+
+### Setting Up Supabase
+
+1. Create a Supabase account at [supabase.com](https://supabase.com)
+2. Create a new project
+3. Get your API keys from Settings > API:
+   - **Project URL** → `SUPABASE_URL`
+   - **anon public** key → `SUPABASE_ANON_KEY`
+   - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY`
+4. Run the database schema:
+   - Go to the SQL Editor in your Supabase dashboard
+   - Copy and paste the contents of `backend/src/database/schema.sql`
+   - Run the query to create tables and sample data
+
+### Database Schema
+
+The database includes the following tables:
+
+- **users** - User accounts with authentication
+- **buses** - Bus fleet information
+- **routes** - Available travel routes with pricing
+- **bookings** - Customer bookings with passenger info
+- **semester_breaks** - Academic calendar for break periods
+
+### Running Without Supabase
+
+The app includes in-memory fallback data, so it can run without Supabase configured. This is useful for:
+- Local development without a database
+- Quick demos and testing
+
+When Supabase credentials are not set, the app will use mock data and log a warning.
 
 ## Payment Integration (Safepay)
 

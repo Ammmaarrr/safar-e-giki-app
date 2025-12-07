@@ -4,27 +4,36 @@ import jwt from 'jsonwebtoken';
 import { validate, loginSchema, registerSchema } from '../middleware/validation';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
+import supabase from '../services/supabase';
 
 const router = Router();
 
-// In-memory user store (replace with database in production)
+// User interface matching database schema
 interface User {
   id: string;
   name: string;
   email: string;
-  password: string;
+  password_hash: string;
   phone?: string;
+  cnic?: string;
+  student_id?: string;
 }
 
-const users: Map<string, User> = new Map();
+// In-memory user store (fallback when Supabase is not configured)
+const usersMemory: Map<string, User & { password: string }> = new Map();
 
-const generateToken = (user: User): string => {
+const generateToken = (user: { id: string; email: string; name: string }): string => {
   const secret = process.env.JWT_SECRET || 'your-secret-key';
   return jwt.sign(
     { id: user.id, email: user.email, name: user.name },
     secret,
     { expiresIn: '7d' }
   );
+};
+
+// Check if Supabase is configured
+const isSupabaseConfigured = (): boolean => {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && supabase);
 };
 
 // POST /api/auth/register
@@ -35,38 +44,82 @@ router.post(
     try {
       const { name, email, password, phone } = req.body;
 
-      // Check if user already exists
-      const existingUser = Array.from(users.values()).find((u) => u.email === email);
-      if (existingUser) {
-        throw createError('User already exists with this email', 400);
+      if (isSupabaseConfigured()) {
+        // Check if user already exists in Supabase
+        const { data: existingUser } = await supabase!
+          .from('users')
+          .select('id')
+          .eq('email', email)
+          .single();
+
+        if (existingUser) {
+          throw createError('User already exists with this email', 400);
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Create user in Supabase
+        const { data: newUser, error } = await supabase!
+          .from('users')
+          .insert({
+            email,
+            password_hash: hashedPassword,
+            name,
+            phone,
+          })
+          .select('id, name, email, phone')
+          .single();
+
+        if (error) {
+          console.error('Supabase error creating user:', error);
+          throw createError('Failed to create user', 500);
+        }
+
+        // Generate token
+        const token = generateToken(newUser);
+
+        res.status(201).json({
+          user: {
+            id: newUser.id,
+            name: newUser.name,
+            email: newUser.email,
+            phone: newUser.phone,
+          },
+          token,
+        });
+      } else {
+        // Fallback to in-memory store
+        const existingUser = Array.from(usersMemory.values()).find((u) => u.email === email);
+        if (existingUser) {
+          throw createError('User already exists with this email', 400);
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const user = {
+          id: `user_${Date.now()}`,
+          name,
+          email,
+          password: hashedPassword,
+          password_hash: hashedPassword,
+          phone,
+        };
+
+        usersMemory.set(user.id, user);
+
+        const token = generateToken(user);
+
+        res.status(201).json({
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+          },
+          token,
+        });
       }
-
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Create user
-      const user: User = {
-        id: `user_${Date.now()}`,
-        name,
-        email,
-        password: hashedPassword,
-        phone,
-      };
-
-      users.set(user.id, user);
-
-      // Generate token
-      const token = generateToken(user);
-
-      res.status(201).json({
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-        },
-        token,
-      });
     } catch (error) {
       next(error);
     }
@@ -81,30 +134,60 @@ router.post(
     try {
       const { email, password } = req.body;
 
-      // Find user
-      const user = Array.from(users.values()).find((u) => u.email === email);
-      if (!user) {
-        throw createError('Invalid email or password', 401);
+      if (isSupabaseConfigured()) {
+        // Find user in Supabase
+        const { data: user, error } = await supabase!
+          .from('users')
+          .select('id, name, email, password_hash, phone')
+          .eq('email', email)
+          .single();
+
+        if (error || !user) {
+          throw createError('Invalid email or password', 401);
+        }
+
+        // Check password
+        const isValidPassword = await bcrypt.compare(password, user.password_hash);
+        if (!isValidPassword) {
+          throw createError('Invalid email or password', 401);
+        }
+
+        // Generate token
+        const token = generateToken(user);
+
+        res.json({
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+          },
+          token,
+        });
+      } else {
+        // Fallback to in-memory store
+        const user = Array.from(usersMemory.values()).find((u) => u.email === email);
+        if (!user) {
+          throw createError('Invalid email or password', 401);
+        }
+
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (!isValidPassword) {
+          throw createError('Invalid email or password', 401);
+        }
+
+        const token = generateToken(user);
+
+        res.json({
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+          },
+          token,
+        });
       }
-
-      // Check password
-      const isValidPassword = await bcrypt.compare(password, user.password);
-      if (!isValidPassword) {
-        throw createError('Invalid email or password', 401);
-      }
-
-      // Generate token
-      const token = generateToken(user);
-
-      res.json({
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-        },
-        token,
-      });
     } catch (error) {
       next(error);
     }
@@ -117,17 +200,39 @@ router.get(
   authMiddleware,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const user = users.get(req.userId!);
-      if (!user) {
-        throw createError('User not found', 404);
-      }
+      if (isSupabaseConfigured()) {
+        const { data: user, error } = await supabase!
+          .from('users')
+          .select('id, name, email, phone, cnic, student_id')
+          .eq('id', req.userId)
+          .single();
 
-      res.json({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-      });
+        if (error || !user) {
+          throw createError('User not found', 404);
+        }
+
+        res.json({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          cnic: user.cnic,
+          studentId: user.student_id,
+        });
+      } else {
+        // Fallback to in-memory store
+        const user = usersMemory.get(req.userId!);
+        if (!user) {
+          throw createError('User not found', 404);
+        }
+
+        res.json({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+        });
+      }
     } catch (error) {
       next(error);
     }
